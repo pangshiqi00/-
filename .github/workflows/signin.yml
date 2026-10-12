@@ -2,8 +2,8 @@ name: TRAE 每日签到
 
 on:
   schedule:
-    # 每天 00:00 UTC = 08:00 北京时间
-    - cron: '0 0 * * *'
+    # 每天 16:00 UTC 触发 = 北京时间 00:00，之后随机延时 0~4 小时再签到
+    - cron: '0 16 * * *'
   workflow_dispatch: # 支持手动触发
 
 jobs:
@@ -41,6 +41,13 @@ jobs:
             exit 1
           fi
           echo "已生成 $n 个账号凭证"
+
+      - name: 随机延时（模拟真人，0~4 小时）
+        if: github.event_name == 'schedule'
+        run: |
+          S=$(( (RANDOM % 14400) + 60 ))
+          echo "北京时间 00:00 触发，随机等待 $S 秒（约 $((S/60)) 分钟）后签到"
+          sleep $S
 
       - name: 执行签到
         run: |
