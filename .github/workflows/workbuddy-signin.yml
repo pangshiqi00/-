@@ -1,0 +1,56 @@
+name: WorkBuddy 每日签到
+
+on:
+  schedule:
+    # 每天 01:00 UTC = 09:00 北京时间（与 Trae 签到错峰）
+    - cron: '0 1 * * *'
+  workflow_dispatch: # 支持手动触发
+
+jobs:
+  signin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 生成凭证文件
+        env:
+          WORKBUDDY_AUTH_1: ${{ secrets.WORKBUDDY_AUTH_1 }}
+          WORKBUDDY_AUTH_2: ${{ secrets.WORKBUDDY_AUTH_2 }}
+          WORKBUDDY_AUTH_3: ${{ secrets.WORKBUDDY_AUTH_3 }}
+        run: |
+          mkdir -p auths
+          # 只写入非空的凭证，避免空 Secret 生成无效文件
+          n=0
+          for v in "$WORKBUDDY_AUTH_1" "$WORKBUDDY_AUTH_2" "$WORKBUDDY_AUTH_3"; do
+            if [ -n "$v" ]; then
+              n=$((n+1))
+              printf '%s' "$v" > "auths/workbuddy-$n.json"
+            fi
+          done
+          if [ "$n" -eq 0 ]; then
+            echo "❌ 未配置任何 WORKBUDDY_AUTH_N secret"
+            exit 1
+          fi
+          echo "已生成 $n 个账号凭证"
+
+      - name: 执行签到
+        run: python checkin.py
+
+      - name: Bark 通知
+        if: always()
+        run: |
+          TITLE="WorkBuddy签到"
+          BODY="查看 Actions 运行日志获取结果"
+          TITLE_ENC=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$TITLE'))")
+          BODY_ENC=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$BODY'))")
+          curl -s -X POST "${{ secrets.BARK_URL }}/${TITLE_ENC}/${BODY_ENC}" || true
+
+      - name: 清理凭证
+        if: always()
+        run: rm -rf auths
