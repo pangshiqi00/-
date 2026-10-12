@@ -22,13 +22,25 @@ jobs:
         run: go build -o signin_bin ./cmd/signin
 
       - name: 生成凭证文件
+        env:
+          TRAE_AUTH_1: ${{ secrets.TRAE_AUTH_1 }}
+          TRAE_AUTH_2: ${{ secrets.TRAE_AUTH_2 }}
+          TRAE_AUTH_3: ${{ secrets.TRAE_AUTH_3 }}
         run: |
           mkdir -p auths
-          # 账号1
-          echo '${{ secrets.TRAE_AUTH_1 }}' > auths/trae-1.json
-          # 账号2
-          echo '${{ secrets.TRAE_AUTH_2 }}' > auths/trae-2.json
-          # 如需更多账号，添加更多 TRAE_AUTH_N
+          # 只写入非空的凭证，避免空 Secret 生成无效文件被计为失败
+          n=0
+          for v in "$TRAE_AUTH_1" "$TRAE_AUTH_2" "$TRAE_AUTH_3"; do
+            if [ -n "$v" ]; then
+              n=$((n+1))
+              printf '%s' "$v" > "auths/trae-$n.json"
+            fi
+          done
+          if [ "$n" -eq 0 ]; then
+            echo "❌ 未配置任何 TRAE_AUTH_N secret"
+            exit 1
+          fi
+          echo "已生成 $n 个账号凭证"
 
       - name: 执行签到
         run: |

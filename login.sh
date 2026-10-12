@@ -214,10 +214,10 @@ EXPIRES_AT=$(echo "$CRED" | python3 -c "import json,sys; print(json.load(sys.std
 
 AUTH_FILE="$AUTH_DIR/trae-${ACCT_UID}.json"
 if [[ -f "$AUTH_FILE" ]]; then
-    echo "账号已存在（uid=$ACCT_UID），将覆盖更新凭证"
+    echo "账号已存在（uid=${ACCT_UID}），将覆盖更新凭证"
     ACTION="覆盖"
 else
-    echo "新账号（uid=$ACCT_UID），新增 auth 文件"
+    echo "新账号（uid=${ACCT_UID}），新增 auth 文件"
     ACTION="新增"
 fi
 
