@@ -21,13 +21,14 @@ jobs:
       - name: 生成凭证文件
         env:
           WORKBUDDY_AUTH_1: ${{ secrets.WORKBUDDY_AUTH_1 }}
+          WORKBUDDY_AUTH_135220856750: ${{ secrets.WORKBUDDY_AUTH_135220856750 }}
           WORKBUDDY_AUTH_2: ${{ secrets.WORKBUDDY_AUTH_2 }}
           WORKBUDDY_AUTH_3: ${{ secrets.WORKBUDDY_AUTH_3 }}
         run: |
           mkdir -p auths
           # 只写入非空的凭证，避免空 Secret 生成无效文件
           n=0
-          for v in "$WORKBUDDY_AUTH_1" "$WORKBUDDY_AUTH_2" "$WORKBUDDY_AUTH_3"; do
+          for v in "$WORKBUDDY_AUTH_1" "$WORKBUDDY_AUTH_135220856750" "$WORKBUDDY_AUTH_2" "$WORKBUDDY_AUTH_3"; do
             if [ -n "$v" ]; then
               n=$((n+1))
               printf '%s' "$v" > "auths/workbuddy-$n.json"
