@@ -180,7 +180,8 @@ crontab -e
 |---|---|
 | `intl_login.py` | 设备授权登录（Google / GitHub / X，免手机号），输出 `备注\|AT\|uid\|RT` |
 | `intl_checkin.py` | 探测活动 → 领取每日奖励 → 活跃上报（连登）→ 查积分 |
-| `.github/workflows/workbuddy-intl-signin.yml` | 每天 UTC 01:00 / 13:00 各跑一次（已领过再跑只回「今日已领取」） |
+| `intl_gate.py` | 抽签门控：纽约时间 07:00~17:00 内随机挑一个时刻执行 |
+| `.github/workflows/workbuddy-intl-signin.yml` | 每 30 分钟触发一次，由抽签决定哪一次真正签到 |
 
 **配置三步：**
 

@@ -2,13 +2,11 @@ name: WorkBuddy 国际版签到
 
 on:
   schedule:
-    # 触发时间点：cron 用 UTC，北京时间 = UTC + 8
-    #   '0 1 * * *'  = 北京 09:00
-    #   '0 13 * * *' = 北京 21:00
-    # 国际版（www.workbuddy.ai）每日活跃。已领过再跑会返回「今日已领取」，不会重复扣次数。
-    - cron: '0 1 * * *'
-    - cron: '0 13 * * *'
-  workflow_dispatch: # 支持手动触发
+    # 每 30 分钟触发一次（UTC 11:00~22:00）。
+    # 这个区间同时覆盖纽约 07:00~17:00 在夏令时（UTC-4）和冬令时（UTC-5）下的全部可能；
+    # 真正执行哪一次由 intl_gate.py 按日期抽签决定，其余运行几秒内退出，几乎不耗额度。
+    - cron: '0,30 11-22 * * *'
+  workflow_dispatch: # 手动触发（不抽签，直接签到）
 
 concurrency:
   group: workbuddy-intl
@@ -17,18 +15,24 @@ concurrency:
 jobs:
   signin:
     runs-on: ubuntu-latest
-    # 必须 ≥ 随机延时上限，否则任务会在 sleep 期间被强制取消
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      # 纽约时间 07:00~17:00 内随机一个时刻：没抽中就在几秒内退出（不装 Python、不跑签到）
+      - name: 抽签（今天这次要不要签）
+        id: gate
+        run: python3 intl_gate.py
+
       - name: 安装 Python
+        if: steps.gate.outputs.run == '1'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: 检查 Secret
+        if: steps.gate.outputs.run == '1'
         env:
           TOKENS: ${{ secrets.WORKBUDDY_INTL_TOKENS }}
         run: |
@@ -38,15 +42,8 @@ jobs:
           fi
           echo "✅ 已配置国际版令牌（长度 ${#TOKENS}）"
 
-      - name: 随机延时（模拟真人）
-        if: github.event_name == 'schedule'
-        run: |
-          # 随机窗口：RANDOM % N 秒，N=900 → 0.5~15 分钟（改这里就是改随机范围）
-          S=$(( (RANDOM % 900) + 30 ))
-          echo "随机等待 $S 秒（约 $((S/60)) 分钟）后签到"
-          sleep $S
-
       - name: 执行签到
+        if: steps.gate.outputs.run == '1'
         env:
           WORKBUDDY_INTL_TOKENS: ${{ secrets.WORKBUDDY_INTL_TOKENS }}
           BARK_URL: ${{ secrets.BARK_URL }}
