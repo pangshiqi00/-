@@ -2,8 +2,10 @@ name: WorkBuddy 国际版签到
 
 on:
   schedule:
-    # 国际版（www.workbuddy.ai）每日活跃。UTC 01:00 / 13:00 各跑一次，
-    # 覆盖不确定的重置时区；已领过再跑会返回「今日已领取」，不会重复扣次数。
+    # 触发时间点：cron 用 UTC，北京时间 = UTC + 8
+    #   '0 1 * * *'  = 北京 09:00
+    #   '0 13 * * *' = 北京 21:00
+    # 国际版（www.workbuddy.ai）每日活跃。已领过再跑会返回「今日已领取」，不会重复扣次数。
     - cron: '0 1 * * *'
     - cron: '0 13 * * *'
   workflow_dispatch: # 支持手动触发
@@ -15,7 +17,8 @@ concurrency:
 jobs:
   signin:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 必须 ≥ 随机延时上限，否则任务会在 sleep 期间被强制取消
+    timeout-minutes: 25
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -35,10 +38,11 @@ jobs:
           fi
           echo "✅ 已配置国际版令牌（长度 ${#TOKENS}）"
 
-      - name: 随机延时（模拟真人，0~30 分钟）
+      - name: 随机延时（模拟真人）
         if: github.event_name == 'schedule'
         run: |
-          S=$(( (RANDOM % 1800) + 30 ))
+          # 随机窗口：RANDOM % N 秒，N=900 → 0.5~15 分钟（改这里就是改随机范围）
+          S=$(( (RANDOM % 900) + 30 ))
           echo "随机等待 $S 秒（约 $((S/60)) 分钟）后签到"
           sleep $S
 
