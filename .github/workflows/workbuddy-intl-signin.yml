@@ -1,0 +1,53 @@
+name: WorkBuddy 国际版签到
+
+on:
+  schedule:
+    # 国际版（www.workbuddy.ai）每日活跃。UTC 01:00 / 13:00 各跑一次，
+    # 覆盖不确定的重置时区；已领过再跑会返回「今日已领取」，不会重复扣次数。
+    - cron: '0 1 * * *'
+    - cron: '0 13 * * *'
+  workflow_dispatch: # 支持手动触发
+
+concurrency:
+  group: workbuddy-intl
+  cancel-in-progress: false
+
+jobs:
+  signin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 检查 Secret
+        env:
+          TOKENS: ${{ secrets.WORKBUDDY_INTL_TOKENS }}
+        run: |
+          if [ -z "$TOKENS" ]; then
+            echo "❌ 未配置 WORKBUDDY_INTL_TOKENS（用 intl_login.py 获取，格式：备注|AT|uid|RT）"
+            exit 1
+          fi
+          echo "✅ 已配置国际版令牌（长度 ${#TOKENS}）"
+
+      - name: 随机延时（模拟真人，0~30 分钟）
+        if: github.event_name == 'schedule'
+        run: |
+          S=$(( (RANDOM % 1800) + 30 ))
+          echo "随机等待 $S 秒（约 $((S/60)) 分钟）后签到"
+          sleep $S
+
+      - name: 执行签到
+        env:
+          WORKBUDDY_INTL_TOKENS: ${{ secrets.WORKBUDDY_INTL_TOKENS }}
+          BARK_URL: ${{ secrets.BARK_URL }}
+        run: python intl_checkin.py
+
+      - name: 清理
+        if: always()
+        run: rm -f intl_login_result.json

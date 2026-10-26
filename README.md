@@ -171,6 +171,32 @@ crontab -e
 0 8 * * * cd /path/to/trae-signin && bash signin.sh >> signin.log 2>&1
 ```
 
+## 🌍 海外版（WorkBuddy AI · www.workbuddy.ai）
+
+国内版与海外版是**两套独立登录态**（`www.codebuddy.cn` ↔ `www.workbuddy.ai`，令牌互不通用），
+所以海外版用独立脚本 + 独立工作流，与现有国内签到并存、互不影响。
+
+| 文件 | 作用 |
+|---|---|
+| `intl_login.py` | 设备授权登录（Google / GitHub / X，免手机号），输出 `备注\|AT\|uid\|RT` |
+| `intl_checkin.py` | 探测活动 → 领取每日奖励 → 活跃上报（连登）→ 查积分 |
+| `.github/workflows/workbuddy-intl-signin.yml` | 每天 UTC 01:00 / 13:00 各跑一次（已领过再跑只回「今日已领取」） |
+
+**配置三步：**
+
+1. 本地执行 `python intl_login.py`，浏览器打开授权链接登录，复制输出的那一行
+2. 仓库 Settings → Secrets and variables → Actions 新增 `WORKBUDDY_INTL_TOKENS`
+   （多账号用换行分隔，一行一个：`备注|AT|uid|RT`）
+3. 到 Actions 手动跑一次「WorkBuddy 国际版签到」验证
+
+**口径说明：**
+
+- 海外版的「每日奖励」不是单纯签到，而是一条活跃任务链：`daily-checkin` 领取 + `/v2/report` 活跃上报（点亮连登）
+- 活动未开放是正常状态，不算失败；签到成功与活跃结果分开报告
+- 令牌失效会明确报「令牌失效」，重跑 `intl_login.py` 更新 secret 即可；带 RT 时会先自动续期再试
+- 命中账号级风控（`11140 / request illegal`）立即停止该账号本轮，不刷新、不重试
+- 需要额外保活对话与网页会话：`python intl_checkin.py --keepalive`
+
 ## 目录结构
 
 ```

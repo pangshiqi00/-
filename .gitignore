@@ -1,5 +1,13 @@
 # 凭证文件（含 token）
 auths/
+intl_login_result.json
+wb_intl_tokens.json
+
+# Python
+__pycache__/
+
+# 本地助手数据
+.workbuddy-ai/
 
 # 编译产物
 signin_bin
