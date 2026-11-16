@@ -2,26 +2,43 @@ name: TRAE 每日签到
 
 on:
   schedule:
-    # 每天 16:00 UTC 触发 = 北京时间 00:00，之后随机延时 0~4 小时再签到
-    - cron: '0 16 * * *'
-  workflow_dispatch: # 支持手动触发
+    # 每 30 分钟触发一次（UTC 16:00~20:30 = 北京时间次日 00:00~04:30）。
+    # 真正执行哪一次由 checkin_gate.py 按日期抽签决定，其余运行几秒内退出，几乎不耗额度。
+    # 不要用 runner 上 sleep 的方式做随机延时：sleep 全程计费，0~4 小时会把免费额度烧穿。
+    - cron: '0,30 16-20 * * *'
+  workflow_dispatch: # 手动触发（不抽签，直接签到）
+
+concurrency:
+  group: trae-cn
+  cancel-in-progress: false
 
 jobs:
   signin:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      # 北京时间 00:00~04:00 内随机一个时刻：没抽中就在几秒内退出（不装 Go、不编译、不签到）
+      - name: 抽签（今天这次要不要签）
+        id: gate
+        run: >-
+          python3 checkin_gate.py
+          --tz Asia/Shanghai --start 0 --end 4 --hard-stop 5 --seed wb-trae-
+
       - name: 安装 Go
+        if: steps.gate.outputs.run == '1'
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
 
       - name: 编译签到工具
+        if: steps.gate.outputs.run == '1'
         run: go build -o signin_bin ./cmd/signin
 
       - name: 生成凭证文件
+        if: steps.gate.outputs.run == '1'
         env:
           TRAE_AUTH_1: ${{ secrets.TRAE_AUTH_1 }}
           TRAE_AUTH_2: ${{ secrets.TRAE_AUTH_2 }}
@@ -42,14 +59,8 @@ jobs:
           fi
           echo "已生成 $n 个账号凭证"
 
-      - name: 随机延时（模拟真人，0~4 小时）
-        if: github.event_name == 'schedule'
-        run: |
-          S=$(( (RANDOM % 14400) + 60 ))
-          echo "北京时间 00:00 触发，随机等待 $S 秒（约 $((S/60)) 分钟）后签到"
-          sleep $S
-
       - name: 执行签到
+        if: steps.gate.outputs.run == '1'
         run: |
           OUTPUT=$(./signin_bin auths 2>&1)
           echo "$OUTPUT"
@@ -59,6 +70,7 @@ jobs:
 
       - name: 提取结果
         id: result
+        if: steps.gate.outputs.run == '1'
         run: |
           echo "$SIGNIN_OUTPUT" | grep -oP '总计=\K\d+' | head -1 | xargs -I{} echo "total={}" >> $GITHUB_OUTPUT || echo "total=?" >> $GITHUB_OUTPUT
           echo "$SIGNIN_OUTPUT" | grep -oP '签到成功=\K\d+' | head -1 | xargs -I{} echo "ok={}" >> $GITHUB_OUTPUT || echo "ok=?" >> $GITHUB_OUTPUT
@@ -68,7 +80,7 @@ jobs:
           echo "$SIGNIN_OUTPUT" | grep -oP '失败=\K\d+' | head -1 | xargs -I{} echo "fail={}" >> $GITHUB_OUTPUT || echo "fail=?" >> $GITHUB_OUTPUT
 
       - name: Bark 通知
-        if: always()
+        if: always() && steps.gate.outputs.run == '1'
         run: |
           TITLE="✅ TRAE签到"
           BODY="总计${{ steps.result.outputs.total }} 成功${{ steps.result.outputs.ok }} 已签${{ steps.result.outputs.already }} 未确认${{ steps.result.outputs.unconf }} 设备异常${{ steps.result.outputs.busy }} 失败${{ steps.result.outputs.fail }}"

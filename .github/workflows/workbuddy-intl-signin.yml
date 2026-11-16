@@ -4,7 +4,7 @@ on:
   schedule:
     # 每 30 分钟触发一次（UTC 11:00~22:00）。
     # 这个区间同时覆盖纽约 07:00~17:00 在夏令时（UTC-4）和冬令时（UTC-5）下的全部可能；
-    # 真正执行哪一次由 intl_gate.py 按日期抽签决定，其余运行几秒内退出，几乎不耗额度。
+    # 真正执行哪一次由 checkin_gate.py 按日期抽签决定，其余运行几秒内退出，几乎不耗额度。
     - cron: '0,30 11-22 * * *'
   workflow_dispatch: # 手动触发（不抽签，直接签到）
 
@@ -23,7 +23,7 @@ jobs:
       # 纽约时间 07:00~17:00 内随机一个时刻：没抽中就在几秒内退出（不装 Python、不跑签到）
       - name: 抽签（今天这次要不要签）
         id: gate
-        run: python3 intl_gate.py
+        run: python3 checkin_gate.py
 
       - name: 安装 Python
         if: steps.gate.outputs.run == '1'

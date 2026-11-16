@@ -153,9 +153,11 @@ TRAE 的积分由**多个独立到期的包**组成，`总计` 是它们的合�
    |---|---|---|
    | `TRAE_AUTH_1` | 账号1 的完整凭证 JSON | `auths/trae-*.json` 的文件内容 |
    | `TRAE_AUTH_2` | 账号2 的完整凭证 JSON | 同上，多个账号依次添加 |
+   | `WORKBUDDY_AUTH_1` | WorkBuddy 国内账号1 的凭证 JSON | `auths/workbuddy-*.json` 的文件内容 |
+   | `WORKBUDDY_AUTH_2` | WorkBuddy 国内账号2 的凭证 JSON | 同上 |
    | `BARK_URL` | `https://api.day.app/你的Key` | Bark 推送地址 |
 
-3. 每天北京时间 08:00 自动执行，也可在 Actions 页面手动触发
+3. 每天**北京时间 00:00~04:00 之间随机一个时刻**自动执行，也可在 Actions 页面手动触发（手动触发不抽签，立即签到）
 
 > 凭证 JSON 格式（登录后从 `auths/trae-*.json` 复制）：
 > ```json
@@ -171,6 +173,27 @@ crontab -e
 0 8 * * * cd /path/to/trae-signin && bash signin.sh >> signin.log 2>&1
 ```
 
+### ⚠️ 随机延时必须用抽签，不能用 sleep
+
+早期版本在 runner 上 `sleep $((RANDOM % 14400 + 60))` 来模拟真人，**这是把免费额度烧穿的直接原因**：
+
+| 做法 | 每天计费分钟 | 每月（30 天） |
+|---|---|---|
+| runner 上 sleep 0~4 小时（两条工作流） | 平均 246，最坏 486 | 7380 分钟 ≈ $44 |
+| 抽签门控（未抽中几秒退出） | 约 52 | 1560 分钟 ≈ $9.4 |
+
+runner 上的 `sleep` 全程计入 Actions 计费分钟。额度耗尽后**所有**工作流一起无法启动，
+表现为「三个平台的签到同时全挂」——而它们的登录态其实互不相干。
+
+现在三条工作流统一用 `checkin_gate.py`：cron 每 30 分钟触发，用日期做种子抽一个当天时刻，
+没抽中的运行在几秒内退出（不装运行时、不跑签到）。随机时间的效果不变，成本降到约 1/5。
+
+> **计费按 job 向上取整到整分钟**：空跑只花 5 秒，也计 1 分钟。所以触发次数本身就是成本下限，
+> 三条工作流每天 44 次触发 = 至少 44 分钟，这是省不掉的。
+>
+> 私有仓库 GitHub Free 含 $12/月 计算额度（Linux 2 核 $0.006/分钟 ≈ 2000 分钟），
+> 上表 1560 分钟约占 78%，能装下但余量不多。**公共仓库的标准 runner 完全免费、不计量。**
+
 ## 🌍 海外版（WorkBuddy AI · www.workbuddy.ai）
 
 国内版与海外版是**两套独立登录态**（`www.codebuddy.cn` ↔ `www.workbuddy.ai`，令牌互不通用），
@@ -180,7 +203,7 @@ crontab -e
 |---|---|
 | `intl_login.py` | 设备授权登录（Google / GitHub / X，免手机号），输出 `备注\|AT\|uid\|RT` |
 | `intl_checkin.py` | 探测活动 → 领取每日奖励 → 活跃上报（连登）→ 查积分 |
-| `intl_gate.py` | 抽签门控：纽约时间 07:00~17:00 内随机挑一个时刻执行 |
+| `checkin_gate.py` | 抽签门控（三条工作流共用）：国际版默认纽约 07:00~17:00，国内版传参改为北京时间 00:00~04:00 |
 | `.github/workflows/workbuddy-intl-signin.yml` | 每 30 分钟触发一次，由抽签决定哪一次真正签到 |
 
 **配置三步：**

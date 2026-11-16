@@ -2,23 +2,39 @@ name: WorkBuddy 每日签到
 
 on:
   schedule:
-    # 每天 16:00 UTC 触发 = 北京时间 00:00，之后随机延时 0~4 小时再签到
-    - cron: '0 16 * * *'
-  workflow_dispatch: # 支持手动触发
+    # 每 30 分钟触发一次（UTC 16:00~20:30 = 北京时间次日 00:00~04:30）。
+    # 真正执行哪一次由 checkin_gate.py 按日期抽签决定，其余运行几秒内退出，几乎不耗额度。
+    # 不要用 runner 上 sleep 的方式做随机延时：sleep 全程计费，0~4 小时会把免费额度烧穿。
+    - cron: '0,30 16-20 * * *'
+  workflow_dispatch: # 手动触发（不抽签，直接签到）
+
+concurrency:
+  group: workbuddy-cn
+  cancel-in-progress: false
 
 jobs:
   signin:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      # 北京时间 00:00~04:00 内随机一个时刻：没抽中就在几秒内退出（不装 Python、不跑签到）
+      - name: 抽签（今天这次要不要签）
+        id: gate
+        run: >-
+          python3 checkin_gate.py
+          --tz Asia/Shanghai --start 0 --end 4 --hard-stop 5 --seed wb-cn-
+
       - name: 安装 Python
+        if: steps.gate.outputs.run == '1'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: 生成凭证文件
+        if: steps.gate.outputs.run == '1'
         env:
           WORKBUDDY_AUTH_1: ${{ secrets.WORKBUDDY_AUTH_1 }}
           WORKBUDDY_AUTH_2: ${{ secrets.WORKBUDDY_AUTH_2 }}
@@ -33,29 +49,68 @@ jobs:
             fi
           done
           if [ "$n" -eq 0 ]; then
-            echo "❌ 未配置任何 WORKBUDDY_AUTH_N secret"
+            echo "❌ 未配置 WORKBUDDY_AUTH_1 / WORKBUDDY_AUTH_2"
             exit 1
           fi
           echo "已生成 $n 个账号凭证"
 
-      - name: 随机延时（模拟真人，0~4 小时）
-        if: github.event_name == 'schedule'
-        run: |
-          S=$(( (RANDOM % 14400) + 60 ))
-          echo "北京时间 00:00 触发，随机等待 $S 秒（约 $((S/60)) 分钟）后签到"
-          sleep $S
-
       - name: 执行签到
-        run: python checkin.py
+        if: steps.gate.outputs.run == '1'
+        id: checkin
+        run: |
+          set +e
+          OUTPUT=$(python checkin.py 2>&1)
+          CODE=$?
+          set -e
+          printf '%s\n' "$OUTPUT"
+          {
+            echo "code=$CODE"
+            echo "output<<WB_EOF"
+            printf '%s\n' "$OUTPUT"
+            echo "WB_EOF"
+          } >> "$GITHUB_OUTPUT"
+          exit $CODE
 
       - name: Bark 通知
-        if: always()
+        if: always() && steps.gate.outputs.run == '1'
+        env:
+          BARK_URL: ${{ secrets.BARK_URL }}
+          CHECKIN_CODE: ${{ steps.checkin.outputs.code }}
+          CHECKIN_OUTPUT: ${{ steps.checkin.outputs.output }}
         run: |
-          TITLE="WorkBuddy签到"
-          BODY="查看 Actions 运行日志获取结果"
-          TITLE_ENC=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$TITLE'))")
-          BODY_ENC=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$BODY'))")
-          curl -s -X POST "${{ secrets.BARK_URL }}/${TITLE_ENC}/${BODY_ENC}" || true
+          python3 - <<'PY'
+          import os, urllib.parse, urllib.request
+
+          code = os.environ.get("CHECKIN_CODE", "")
+          out = os.environ.get("CHECKIN_OUTPUT", "")
+          bark = os.environ.get("BARK_URL", "").strip()
+
+          detail = [l.strip() for l in out.splitlines()
+                    if l.strip().startswith(("状态:", "积分:"))]
+          body = " / ".join(detail) if detail else out.strip()
+          body = body[-400:] if body else "未取到签到输出，查看 Actions 日志"
+
+          if code == "0":
+              title = "✅ WorkBuddy签到"
+          elif code == "":
+              title = "⚠️ WorkBuddy签到未执行"
+          else:
+              title = "⚠️ WorkBuddy签到异常"
+
+          print(title, "|", body)
+          if not bark:
+              print("未配置 BARK_URL，跳过推送")
+              raise SystemExit(0)
+
+          url = (bark.rstrip("/") + "/" + urllib.parse.quote(title)
+                 + "/" + urllib.parse.quote(body))
+          try:
+              req = urllib.request.Request(url, method="POST")
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  print("Bark 推送:", r.status)
+          except Exception as e:
+              print("Bark 推送失败:", e)
+          PY
 
       - name: 清理凭证
         if: always()
