@@ -241,13 +241,17 @@ def http_request(method: str, url: str, headers: dict, body: dict | None = None,
 
 
 # ---------------------------------------------------------------------------
-# WorkBuddy (CodeBuddy 国内版)
+# WorkBuddy (workbuddy.cn 国内版)
 # ---------------------------------------------------------------------------
 class WorkBuddy:
-    """腾讯 CodeBuddy 国内版签到。"""
+    """WorkBuddy 国内版（workbuddy.cn）签到。
 
-    BASE = "https://www.codebuddy.cn"
-    AUTH_BASE = "https://copilot.tencent.com"
+    codebuddy.cn 与 workbuddy.cn 实测共用同一份积分/签到后端数据，
+    签一边另一边即生效，所以只签 workbuddy.cn，不重复签。
+    """
+
+    BASE = "https://www.workbuddy.cn"
+    AUTH_BASE = "https://www.workbuddy.cn"
     UA = "CLI/2.63.2 CodeBuddy/2.63.2"
 
     # 会话失效特征
@@ -258,7 +262,8 @@ class WorkBuddy:
         self.access_token = cred["accessToken"]
         self.refresh_token = cred["refreshToken"]
         self.expires_at = cred.get("expiresAt", 0)
-        self.domain = cred.get("domain", "codebuddy.cn")
+        self.domain = cred.get("domain", "workbuddy.cn")
+        self.source_file = cred.get("_file")
 
     # --- token 刷新 --------------------------------------------------------
     def needs_refresh(self) -> bool:
@@ -268,6 +273,9 @@ class WorkBuddy:
         """用 refreshToken 换新 accessToken，成功则更新内存并返回 True。"""
         headers = {"User-Agent": self.UA, "Content-Type": "application/json"}
         body = {"refreshToken": self.refresh_token}
+        # workbuddy.cn 的 refresh 只读请求头，body 里的 refreshToken 会被忽略
+        headers["X-Refresh-Token"] = self.refresh_token
+        headers["X-Auth-Refresh-Source"] = "plugin"
         try:
             data = http_request("POST", f"{self.AUTH_BASE}/v2/plugin/auth/token/refresh",
                                 headers, body)
@@ -321,7 +329,12 @@ class WorkBuddy:
             if not self.refresh():
                 result["status"] = "token 失效，请重新登录"
                 return result
-            persist(self.uid, "workbuddy", self.to_cred())
+            if self.source_file:
+                Path(self.source_file).write_text(
+                    json.dumps(self.to_cred(), ensure_ascii=False, indent=2),
+                    encoding="utf-8")
+            else:
+                persist(self.uid, "workbuddy", self.to_cred())
 
         # 先查状态
         try:
@@ -335,7 +348,7 @@ class WorkBuddy:
         # 判定会话失效
         raw = json.dumps(st, ensure_ascii=False)
         if any(m in raw for m in self.DEAD_MARKERS):
-            result["status"] = "会话已失效，请重新登录 (login.py)"
+            result["status"] = "会话已失效，请重新登录 (cn_login.py)"
             return result
 
         # 执行签到
@@ -787,8 +800,11 @@ def persist(name: str, product: str, cred: dict) -> None:
 
 
 def load_creds() -> list:
-    """扫描 auths/ 目录，返回 [(product, cred_dict)] 列表。"""
-    items = []
+    """扫描 auths/ 目录，返回 [(product, cred_dict)] 列表。
+
+    同一 uid 只保留 expiresAt 最晚的一份，避免重复签到。
+    """
+    entries = []
     for p in sorted(CRED_DIR.glob("*.json")):
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
@@ -797,12 +813,40 @@ def load_creds() -> list:
             continue
         stem = p.stem
         if stem.startswith("workbuddy-"):
-            items.append(("workbuddy", data))
+            data["_file"] = str(p)
+            entries.append(("workbuddy", data, p.name))
         elif stem.startswith("trae-"):
-            items.append(("trae", data))
+            entries.append(("trae", data, p.name))
         else:
             print(f"  跳过未知凭证文件 {p.name}")
-    return items
+
+    chosen = {}
+    order = []
+    for product, data, name in entries:
+        if product == "workbuddy":
+            uid = str(data.get("uid") or "")
+            key = ("workbuddy", uid) if uid else ("workbuddy", name)
+        else:
+            key = ("trae", name)
+        if key in chosen:
+            old = chosen[key]
+            try:
+                new_exp = float(data.get("expiresAt") or 0)
+            except (TypeError, ValueError):
+                new_exp = 0.0
+            try:
+                old_exp = float(old[1].get("expiresAt") or 0)
+            except (TypeError, ValueError):
+                old_exp = 0.0
+            if product == "workbuddy" and new_exp > old_exp:
+                chosen[key] = (product, data, name)
+                print(f"  账号 {key[1][:8]} 有多份凭证，改用 {name}（有效期更晚）")
+            else:
+                print(f"  跳过重复账号 {name}（uid 已存在）")
+            continue
+        chosen[key] = (product, data, name)
+        order.append(key)
+    return [(chosen[key][0], chosen[key][1]) for key in order]
 
 
 def load_trae_cred() -> dict | None:
@@ -832,13 +876,13 @@ def main() -> int:
         print("（已启用 Trae UI 签到兜底）")
     creds = load_creds()
     if not creds:
-        print("未找到任何凭证。请先运行: python login.py")
+        print("未找到任何凭证。请先运行: python3 cn_login.py（国内）或 intl_login.py（国际）")
         print(f"凭证目录: {CRED_DIR}")
         return 1
 
     overall_ok = True
     for product, cred in creds:
-        print(f"\n[{product}]")
+        print(f"\n[{product}/{str(cred.get('uid', '?'))[:8]}]")
         try:
             if product == "workbuddy":
                 res = WorkBuddy(cred).run()
