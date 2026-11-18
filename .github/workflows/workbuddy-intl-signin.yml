@@ -21,10 +21,25 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      # 纽约时间 07:00~17:00 内随机一个时刻：没抽中就在几秒内退出（不装 Python、不跑签到）
+      # 纽约时间 07:00~17:00 抽一个目标时刻，到点后真签；当天最多 3 次，没到点就几秒退出（不装 Python）
+      # 当天已执行次数存在 Actions 缓存里（按天、按工作流分别计数），用于限次
+      - name: 取当天日期
+        id: day
+        run: echo "today=$(TZ=America/New_York date +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: 读取当天已执行次数
+        uses: actions/cache@v4
+        with:
+          path: .wb_state
+          key: wb-intl-${{ steps.day.outputs.today }}-${{ github.run_id }}
+          restore-keys: |
+            wb-intl-${{ steps.day.outputs.today }}-
+
       - name: 抽签（今天这次要不要签）
         id: gate
-        run: python3 checkin_gate.py
+        run: >-
+          python3 checkin_gate.py
+          --max-runs 3 --state .wb_state/count
 
       - name: 安装 Python
         if: steps.gate.outputs.run == '1'

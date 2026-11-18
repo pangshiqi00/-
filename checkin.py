@@ -351,15 +351,20 @@ class WorkBuddy:
             result["status"] = "会话已失效，请重新登录 (cn_login.py)"
             return result
 
-        # 执行签到
-        try:
-            r = self.do_checkin()
-            dbg(f"daily-checkin: {r}")
-            result["raw_checkin"] = r
-            result["status"] = self._parse_checkin_result(r)
-        except RuntimeError as e:
-            result["status"] = f"签到请求失败: {e}"
-            return result
+        # 状态已明确今日签过就不再调 claim（省掉重复请求，降低风控风险）
+        st_data = st.get("data") if isinstance(st.get("data"), dict) else {}
+        if st_data.get("today_checked_in") or st_data.get("checked_in"):
+            result["status"] = "今日已签到"
+        else:
+            # 执行签到
+            try:
+                r = self.do_checkin()
+                dbg(f"daily-checkin: {r}")
+                result["raw_checkin"] = r
+                result["status"] = self._parse_checkin_result(r)
+            except RuntimeError as e:
+                result["status"] = f"签到请求失败: {e}"
+                return result
 
         # 查询积分
         try:

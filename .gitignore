@@ -19,3 +19,6 @@ scheduler
 # IDE
 .idea/
 .vscode/
+
+# 抽签门控的当天执行次数缓存（仅 Actions 用）
+.wb_state/
